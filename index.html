@@ -40,6 +40,11 @@
         background: var(--brand-blue);
     }
 
+    .slides {
+        position: absolute;
+        inset: 0;
+    }
+
     .slide {
         position: absolute;
         inset: 0;
@@ -120,6 +125,11 @@
         background: #fff;
     }
 
+    .control[hidden],
+    .dots[hidden] {
+        display: none;
+    }
+
     @media (max-width: 700px) {
         .control {
             width: 40px;
@@ -136,15 +146,7 @@
 </head>
 <body>
 <main class="carousel" aria-label="LaSante slide presentation">
-    <section class="slide is-active" aria-label="Award-winning care">
-        <img src="assets/slides/award-care.png" alt="LaSante ranked as 2024's top performing FQHC provider by Healthfirst.">
-    </section>
-    <section class="slide" aria-label="Urgent care hours">
-        <img src="assets/slides/urgent-care.png" alt="LaSante Urgent Care is now open with weekday and Sunday evening hours.">
-    </section>
-    <section class="slide" aria-label="Transportation">
-        <img src="assets/slides/transportation.png" alt="LaSante transportation is available by calling or texting 718-246-5700.">
-    </section>
+    <div class="slides"></div>
 
     <button class="control prev" type="button" aria-label="Previous slide">&lsaquo;</button>
     <button class="control next" type="button" aria-label="Next slide">&rsaquo;</button>
@@ -152,25 +154,118 @@
 </main>
 
 <script>
-    const slides = Array.from(document.querySelectorAll(".slide"));
+    const slideDirectory = "assets/slides";
+    const githubDirectoryApi = "https://api.github.com/repos/dygottesman-hue/Lasante/contents/assets/slides?ref=main";
+    const imageExtensions = [".avif", ".gif", ".jpeg", ".jpg", ".png", ".webp"];
+    const fallbackImages = [
+        "award-care.png",
+        "urgent-care.png",
+        "transportation.png"
+    ];
+    const currentSlideOrder = new Map(fallbackImages.map((fileName, index) => [fileName, index]));
+    const slidesContainer = document.querySelector(".slides");
     const dotsContainer = document.querySelector(".dots");
     const previousButton = document.querySelector(".prev");
     const nextButton = document.querySelector(".next");
     const intervalMs = 8000;
+    let slides = [];
+    let dots = [];
     let currentIndex = 0;
     let timerId;
 
-    const dots = slides.map((_, index) => {
-        const dot = document.createElement("button");
-        dot.className = "dot";
-        dot.type = "button";
-        dot.setAttribute("aria-label", `Show slide ${index + 1}`);
-        dot.addEventListener("click", () => showSlide(index));
-        dotsContainer.appendChild(dot);
-        return dot;
-    });
+    function getSlideUrl(fileName) {
+        return `${slideDirectory}/${encodeURIComponent(fileName)}`;
+    }
+
+    function getSlideLabel(fileName) {
+        return fileName
+            .replace(/\.[^.]+$/, "")
+            .replace(/[-_]+/g, " ")
+            .trim();
+    }
+
+    function isImageFile(fileName) {
+        const lowerName = fileName.toLowerCase();
+        return imageExtensions.some((extension) => lowerName.endsWith(extension));
+    }
+
+    async function getImageFiles() {
+        try {
+            const response = await fetch(`${githubDirectoryApi}&cacheBust=${Date.now()}`, {
+                cache: "no-store",
+                headers: {
+                    Accept: "application/vnd.github+json"
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error("Could not load slide directory.");
+            }
+
+            const files = await response.json();
+            const images = files
+                .filter((file) => file.type === "file" && isImageFile(file.name))
+                .map((file) => file.name)
+                .sort((first, second) => {
+                    const firstOrder = currentSlideOrder.get(first) ?? Number.MAX_SAFE_INTEGER;
+                    const secondOrder = currentSlideOrder.get(second) ?? Number.MAX_SAFE_INTEGER;
+
+                    if (firstOrder !== secondOrder) {
+                        return firstOrder - secondOrder;
+                    }
+
+                    return first.localeCompare(second, undefined, { numeric: true });
+                });
+
+            return images.length > 0 ? images : fallbackImages;
+        } catch {
+            return fallbackImages;
+        }
+    }
+
+    function renderSlides(imageFiles) {
+        window.clearInterval(timerId);
+        currentIndex = 0;
+        slidesContainer.textContent = "";
+        dotsContainer.textContent = "";
+
+        imageFiles.forEach((fileName, index) => {
+            const slide = document.createElement("section");
+            const label = getSlideLabel(fileName);
+            slide.className = "slide";
+            slide.setAttribute("aria-label", label || `Slide ${index + 1}`);
+
+            const image = document.createElement("img");
+            image.src = getSlideUrl(fileName);
+            image.alt = label || `Slide ${index + 1}`;
+            image.decoding = "async";
+            image.loading = index === 0 ? "eager" : "lazy";
+
+            slide.appendChild(image);
+            slidesContainer.appendChild(slide);
+
+            const dot = document.createElement("button");
+            dot.className = "dot";
+            dot.type = "button";
+            dot.setAttribute("aria-label", `Show slide ${index + 1}`);
+            dot.addEventListener("click", () => showSlide(index));
+            dotsContainer.appendChild(dot);
+        });
+
+        slides = Array.from(document.querySelectorAll(".slide"));
+        dots = Array.from(document.querySelectorAll(".dot"));
+
+        const hasMultipleSlides = slides.length > 1;
+        previousButton.hidden = !hasMultipleSlides;
+        nextButton.hidden = !hasMultipleSlides;
+        dotsContainer.hidden = !hasMultipleSlides;
+
+        showSlide(0);
+    }
 
     function showSlide(index) {
+        if (slides.length === 0) return;
+
         currentIndex = (index + slides.length) % slides.length;
 
         slides.forEach((slide, slideIndex) => {
@@ -192,7 +287,9 @@
 
     function restartTimer() {
         window.clearInterval(timerId);
-        timerId = window.setInterval(nextSlide, intervalMs);
+        if (slides.length > 1) {
+            timerId = window.setInterval(nextSlide, intervalMs);
+        }
     }
 
     previousButton.addEventListener("click", previousSlide);
@@ -202,7 +299,7 @@
         if (event.key === "ArrowRight") nextSlide();
     });
 
-    showSlide(0);
+    getImageFiles().then(renderSlides);
 </script>
 </body>
 </html>
